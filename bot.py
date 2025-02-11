@@ -1,5 +1,8 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler
+)
 import logging
 import os
 from storage import TaskStorage
@@ -14,53 +17,54 @@ logger = logging.getLogger(__name__)
 # Initialize task storage
 task_storage = TaskStorage()
 
+# Define conversation states
+(EXPECTING_TASK, EXPECTING_CATEGORY, SELECTING_CATEGORY) = range(3)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
     keyboard = [
         [
-            InlineKeyboardButton("📝 New Task", callback_data="new_task"),
-            InlineKeyboardButton("📋 List Tasks", callback_data="list_tasks")
+            InlineKeyboardButton("📝 Pievienot uzdevumu", callback_data="add_task"),
+            InlineKeyboardButton("📋 Uzdevumu saraksts", callback_data="list_tasks")
         ],
         [
-            InlineKeyboardButton("🏷️ Categories", callback_data="categories"),
-            InlineKeyboardButton("✅ Mark Done", callback_data="mark_done")
-        ],
-        [
-            InlineKeyboardButton("❓ Help", callback_data="help")
+            InlineKeyboardButton("🏷️ Skatīt kategorijas", callback_data="view_categories"),
+            InlineKeyboardButton("❓ Palīdzība", callback_data="help")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "Welcome to the Task Manager Bot! 🤖\n\n"
-        "What would you like to do?",
+        "Laipni lūdzam Uzdevumu pārvaldības botā! 🤖\n\n"
+        "Ko vēlaties darīt?",
         reply_markup=reply_markup
     )
+    return ConversationHandler.END
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /help is issued."""
     help_text = (
-        "Here are the available commands:\n\n"
-        "/start - Start the bot and show main menu\n"
-        "/new <task> - Create a new task\n"
-        "/category <task_id> <category> - Set task category\n"
-        "/list - Show all tasks\n"
-        "/list_category <category> - Show tasks in a category\n"
-        "/categories - List all categories\n"
-        "/done <task_id> - Mark task as complete\n"
-        "/help - Show this help message"
+        "Šeit ir tas, ko varat darīt:\n\n"
+        "• Nospiediet '📝 Pievienot uzdevumu', lai izveidotu jaunu uzdevumu\n"
+        "• Nospiediet '📋 Uzdevumu saraksts', lai redzētu visus uzdevumus\n"
+        "• Nospiediet '🏷️ Skatīt kategorijas', lai pārvaldītu uzdevumu kategorijas\n"
+        "• Nospiediet '❓ Palīdzība', lai redzētu šo ziņojumu vēlreiz"
     )
     await update.message.reply_text(help_text)
+    return ConversationHandler.END
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button clicks from inline keyboard."""
     query = update.callback_query
     await query.answer()
 
-    if query.data == "new_task":
+    if query.data == "add_task":
         await query.message.reply_text(
-            "To create a new task, use the command:\n"
-            "/new <your task description>"
+            "Lūdzu, ievadiet uzdevuma aprakstu:\n"
+            "(vai nospiediet /cancel, lai atceltu)",
+            reply_markup=ReplyKeyboardRemove()
         )
+        return EXPECTING_TASK
+
     elif query.data == "list_tasks":
         tasks = task_storage.get_all_tasks()
         if tasks:
@@ -69,123 +73,110 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 category_text = f" [{task['category']}]" if task['category'] else ""
                 status = "✅" if task['completed'] else "📌"
                 task_list.append(f"{status} {task_id}: {task['text']}{category_text}")
-            await query.message.reply_text("Your tasks:\n\n" + "\n".join(task_list))
+            await query.message.reply_text("Jūsu uzdevumi:\n\n" + "\n".join(task_list))
         else:
-            await query.message.reply_text("You don't have any tasks yet!")
-    elif query.data == "categories":
+            await query.message.reply_text("Jums vēl nav uzdevumu!")
+
+    elif query.data == "view_categories":
         categories = task_storage.get_categories()
         if categories:
-            category_list = "\n".join([f"📁 {category}" for category in categories])
+            keyboard = [[InlineKeyboardButton(f"📁 {category}", callback_data=f"cat_{category}")]
+                       for category in categories]
+            keyboard.append([InlineKeyboardButton("🔙 Atpakaļ", callback_data="back_to_main")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.reply_text(
-                f"Available categories:\n\n{category_list}\n\n"
-                "To view tasks in a category, use:\n"
-                "/list_category <category>"
+                "Izvēlieties kategoriju, lai skatītu tās uzdevumus:",
+                reply_markup=reply_markup
             )
         else:
             await query.message.reply_text(
-                "No categories created yet!\n"
-                "Add a category to a task using:\n"
-                "/category <task_id> <category>"
+                "Vēl nav izveidotu kategoriju!\n"
+                "Kategorijas tiks izveidotas automātiski, kad pievienosiet tās uzdevumiem."
             )
-    elif query.data == "mark_done":
-        await query.message.reply_text(
-            "To mark a task as done, use the command:\n"
-            "/done <task_id>"
-        )
+
+    elif query.data.startswith("cat_"):
+        category = query.data[4:]  # Remove 'cat_' prefix
+        tasks = task_storage.get_tasks_by_category(category)
+        if tasks:
+            task_list = []
+            for task_id, task in tasks.items():
+                status = "✅" if task['completed'] else "📌"
+                task_list.append(f"{status} {task_id}: {task['text']}")
+            await query.message.reply_text(
+                f"Uzdevumi kategorijā '{category}':\n\n" + "\n".join(task_list)
+            )
+        else:
+            await query.message.reply_text(f"Kategorijā '{category}' nav atrasts neviens uzdevums")
+
+    elif query.data == "back_to_main":
+        await start(update, context)
+
     elif query.data == "help":
         await help_command(update, context)
 
-    # Show the main menu again
+    return ConversationHandler.END
+
+async def handle_new_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle new task text input."""
+    task_text = update.message.text
+    task_id = task_storage.add_task(task_text)
+
     keyboard = [
-        [
-            InlineKeyboardButton("📝 New Task", callback_data="new_task"),
-            InlineKeyboardButton("📋 List Tasks", callback_data="list_tasks")
-        ],
-        [
-            InlineKeyboardButton("🏷️ Categories", callback_data="categories"),
-            InlineKeyboardButton("✅ Mark Done", callback_data="mark_done")
-        ],
-        [
-            InlineKeyboardButton("❓ Help", callback_data="help")
-        ]
+        [InlineKeyboardButton("➕ Pievienot kategoriju", callback_data=f"add_cat_{task_id}"),
+         InlineKeyboardButton("Izlaist", callback_data="skip_category")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("What would you like to do next?", reply_markup=reply_markup)
 
-async def new_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Create a new task."""
-    if not context.args:
-        await update.message.reply_text(
-            "Please provide a task description.\n"
-            "Usage: /new <task description>"
-        )
-        return
-
-    task_text = " ".join(context.args)
-    task_id = task_storage.add_task(task_text)
     await update.message.reply_text(
-        f"Task added (ID: {task_id}): {task_text}\n\n"
-        "To add a category to this task, use:\n"
-        f"/category {task_id} <category>"
+        f"Uzdevums pievienots (ID: {task_id}): {task_text}\n\n"
+        "Vai vēlaties pievienot šim uzdevumam kategoriju?",
+        reply_markup=reply_markup
     )
+    return SELECTING_CATEGORY
 
-async def set_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Set a category for a task."""
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            "Please provide both task ID and category.\n"
-            "Usage: /category <task_id> <category>"
-        )
-        return
+async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle category selection for a task."""
+    query = update.callback_query
+    await query.answer()
 
-    try:
-        task_id = int(context.args[0])
-        category = context.args[1]
-    except ValueError:
-        await update.message.reply_text("Invalid task ID. Please provide a number.")
-        return
+    if query.data == "skip_category":
+        await query.message.reply_text("Uzdevums saglabāts bez kategorijas!")
+        await start(update, context)
+        return ConversationHandler.END
+
+    task_id = int(query.data.split('_')[2])  # Extract task_id from 'add_cat_X'
+    await query.message.reply_text(
+        "Lūdzu, ievadiet kategorijas nosaukumu šim uzdevumam:\n"
+        "(vai nospiediet /cancel, lai izlaistu)",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    context.user_data['task_id'] = task_id
+    return EXPECTING_CATEGORY
+
+async def handle_new_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle new category text input."""
+    category = update.message.text
+    task_id = context.user_data.get('task_id')
 
     if task_storage.set_task_category(task_id, category):
-        await update.message.reply_text(f"Task {task_id} added to category: {category}")
+        await update.message.reply_text(f"Uzdevums {task_id} pievienots kategorijai: {category}")
     else:
-        await update.message.reply_text(f"Task {task_id} not found.")
+        await update.message.reply_text("Kaut kas nogāja greizi. Lūdzu, mēģiniet vēlreiz.")
 
-async def list_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List tasks in a specific category."""
-    if not context.args:
-        await update.message.reply_text(
-            "Please provide a category name.\n"
-            "Usage: /list_category <category>"
-        )
-        return
+    # Clear user data and return to main menu
+    context.user_data.clear()
+    await start(update, context)
+    return ConversationHandler.END
 
-    category = context.args[0]
-    tasks = task_storage.get_tasks_by_category(category)
-    if tasks:
-        task_list = []
-        for task_id, task in tasks.items():
-            status = "✅" if task['completed'] else "📌"
-            task_list.append(f"{status} {task_id}: {task['text']}")
-        await update.message.reply_text(f"Tasks in category '{category}':\n\n" + "\n".join(task_list))
-    else:
-        await update.message.reply_text(f"No tasks found in category '{category}'")
-
-async def list_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all available categories."""
-    categories = task_storage.get_categories()
-    if categories:
-        category_list = "\n".join([f"📁 {category}" for category in categories])
-        await update.message.reply_text(
-            f"Available categories:\n\n{category_list}\n\n"
-            "To view tasks in a category, use:\n"
-            "/list_category <category>"
-        )
-    else:
-        await update.message.reply_text(
-            "No categories created yet!\n"
-            "Add a category to a task using:\n"
-            "/category <task_id> <category>"
-        )
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the current operation."""
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Darbība atcelta.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await start(update, context)
+    return ConversationHandler.END
 
 def create_application():
     """Create and configure the bot application"""
@@ -196,14 +187,31 @@ def create_application():
 
     application = Application.builder().token(bot_token).build()
 
+    # Create conversation handler for task management
+    conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(button_click),
+            CommandHandler("start", start)
+        ],
+        states={
+            EXPECTING_TASK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_new_task)
+            ],
+            SELECTING_CATEGORY: [
+                CallbackQueryHandler(handle_category_selection)
+            ],
+            EXPECTING_CATEGORY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_new_category)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("start", start)
+        ],
+    )
+
     # Register handlers
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("new", new_task))
-    application.add_handler(CommandHandler("category", set_category))
-    application.add_handler(CommandHandler("list_category", list_category))
-    application.add_handler(CommandHandler("categories", list_categories))
-    application.add_handler(CallbackQueryHandler(button_click))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
 
     return application
