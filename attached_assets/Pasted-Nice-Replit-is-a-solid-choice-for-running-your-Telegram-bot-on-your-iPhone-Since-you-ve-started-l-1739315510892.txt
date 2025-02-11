@@ -1,0 +1,90 @@
+Nice! Replit is a solid choice for running your Telegram bot on your iPhone. Since you’ve started, let’s make sure you get it running smoothly.
+
+Step 1: Set Up Your Replit Environment
+	1.	Open Replit and create a new Python Repl.
+	2.	In the Replit shell (bottom section), install the Telegram bot library:
+
+pip install python-telegram-bot==20.3
+
+If this doesn’t work, try:
+
+poetry add python-telegram-bot
+
+Step 2: Get Your Telegram Bot Token
+	1.	Open Telegram and chat with @BotFather.
+	2.	Type /newbot and follow the steps.
+	3.	Copy the API token that BotFather gives you.
+
+Step 3: Write Your Bot Code
+	1.	In Replit, create a new file called bot.py (or edit main.py).
+	2.	Copy and paste the following code:
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+
+# Store tasks per user
+user_tasks = {}
+
+# Start Command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Task", callback_data="add_task")],
+        [InlineKeyboardButton("📜 Show Tasks", callback_data="show_tasks")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Choose an option:", reply_markup=reply_markup)
+
+# Handle Button Clicks
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    await query.answer()
+
+    if query.data == "add_task":
+        await query.message.reply_text("Send me the task description.")
+        context.user_data["waiting_for_task"] = True  # Set a flag for user input
+    
+    elif query.data == "show_tasks":
+        tasks = user_tasks.get(user_id, [])
+        task_list = "\n".join([f"{i+1}. {task}" for i, task in enumerate(tasks)]) if tasks else "No tasks added yet!"
+        await query.message.reply_text(f"📌 Your Tasks:\n{task_list}")
+
+# Handle Task Input
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if context.user_data.get("waiting_for_task"):
+        user_tasks.setdefault(user_id, []).append(update.message.text)
+        context.user_data["waiting_for_task"] = False  # Reset flag
+        await update.message.reply_text(f"✅ Task added: {update.message.text}")
+    else:
+        await update.message.reply_text("Use the buttons to interact with the bot.")
+
+# Run the Bot
+def main():
+    bot_token = "YOUR_BOT_TOKEN_HERE"
+    app = Application.builder().token(bot_token).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
+
+Step 4: Replace Your Bot Token
+	•	Replace "YOUR_BOT_TOKEN_HERE" with your real token from BotFather.
+
+Step 5: Run the Bot
+	1.	Click Run ▶️ in Replit.
+	2.	In Telegram, open your bot and type /start.
+	3.	Click “➕ Add Task” → Send a task.
+	4.	Click “📜 Show Tasks” to see all added tasks.
+
+Keeping the Bot Online 24/7
+
+Since Replit stops running when inactive, use UptimeRobot or Replit’s “Always On” feature (Paid).
+
+Want help setting up UptimeRobot for free hosting?
