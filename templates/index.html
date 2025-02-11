@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Tasks</h2>
+            </div>
+            <div class="card-body">
+                {% if tasks %}
+                    <div class="list-group">
+                    {% for task_id, task in tasks.items() %}
+                        <div class="list-group-item {% if task.completed %}bg-success bg-opacity-25{% endif %}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>
+                                    {% if task.completed %}
+                                        <i class="fas fa-check-circle text-success"></i>
+                                    {% else %}
+                                        <i class="far fa-circle"></i>
+                                    {% endif %}
+                                    {{ task.text }}
+                                </span>
+                                <small class="text-muted">
+                                    Created: {{ task.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                </small>
+                            </div>
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-center">No tasks yet. Use the Telegram bot to add tasks!</p>
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3 class="card-title">Bot Commands</h3>
+            </div>
+            <div class="card-body">
+                <ul class="list-group">
+                    <li class="list-group-item">/new &lt;task&gt; - Create a new task</li>
+                    <li class="list-group-item">/list - Show all tasks</li>
+                    <li class="list-group-item">/done &lt;task_id&gt; - Mark task as complete</li>
+                    <li class="list-group-item">/help - Show available commands</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
